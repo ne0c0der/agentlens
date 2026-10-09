@@ -1,8 +1,14 @@
 # agent-trace-viz
 
+[**Live demo**](https://ne0c0der.github.io/agentlens/)
+
 See what your AI agent is actually doing. Paste in a run trace, get a timeline of every thought, tool call, and escalation — with durations and errors highlighted.
 
 ## Run it
+
+Open the [live demo](https://ne0c0der.github.io/agentlens/). Nothing to install or clone.
+
+To run the same page locally:
 
 ```bash
 cd agent-trace-viz
