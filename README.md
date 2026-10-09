@@ -34,7 +34,7 @@ Open the URL it prints. That's it — one HTML file, one JSON file, no build ste
 }
 ```
 
-Swap in your own trace and reload. Adapters for real agent frameworks (LangGraph, CrewAI, raw OpenAI tool loops) are the obvious next step — PRs welcome.
+Field-by-field behavior is in [TRACE_FORMAT.md](TRACE_FORMAT.md). Swap in your own trace and reload. Adapters for real agent frameworks (LangGraph, CrewAI, raw OpenAI tool loops) are the obvious next step — PRs welcome.
 
 ## Why
 
