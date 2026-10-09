@@ -1,5 +1,7 @@
 # agent-trace-viz
 
+![Timeline demo: thoughts, tool calls, a rate-limit retry, and an escalation waiting for a decision](demo.gif)
+
 See what your AI agent is actually doing. Paste in a run trace, get a timeline of every thought, tool call, and escalation — with durations and errors highlighted.
 
 ## Run it
