@@ -10,7 +10,6 @@
 | `agent` | Start of the subtitle. |
 | `run_id` | Middle of the subtitle. |
 | `steps` | Timeline. The subtitle ends with this array's length. |
-| `started_at` | On the demo file (`2026-10-09T00:00:00Z`). Not read. |
 
 ## Step
 
@@ -22,7 +21,8 @@
 | `duration_ms` | Milliseconds. A non-zero number is shown as seconds with one decimal (`2100` → `2.1s`). `0` or omitted is shown as `—`. |
 | `detail` | Body text. Blank when missing or empty. |
 | `result` | When non-empty, a following line: `→` plus the text. |
-| `id` | On the demo file (`1`–`8`). Not read. |
+
+`started_at` and step `id` are present in `trace.json`, ignored by the viewer, and optional. The demo file sets `started_at` to `2026-10-09T00:00:00Z` and `id` to `1`–`8`. `index.html` never reads either one, so you can omit both.
 
 Thoughts, tool calls, retries, errors, timing, and escalations are ordinary steps. There is no extra field for them.
 
