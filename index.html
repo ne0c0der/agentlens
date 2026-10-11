@@ -46,12 +46,14 @@
   .swatch.waiting { background: #d29922; }
   .swatch.retry { width: 18px; height: 0; border-top: 2px solid #f85149; border-radius: 0; }
   .hint { color: #8b949e; font-size: 12px; margin-top: 8px; }
+  .load-note { color: #d29922; font-size: 13px; margin: 0 0 12px; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 </style>
 </head>
 <body>
   <h1 id="title">Agent Trace</h1>
   <div class="sub" id="subtitle"></div>
+  <p id="load-note" class="load-note" hidden></p>
   <div class="toggle" role="tablist" aria-label="Trace view">
     <button type="button" id="show-timeline" role="tab" aria-selected="true" aria-controls="timeline" class="active">Timeline</button>
     <button type="button" id="show-graph" role="tab" aria-selected="false" aria-controls="graph-panel">Graph</button>
@@ -68,6 +70,7 @@
     <p class="hint">Solid arrows follow step order. A curved arrow loops a retry back to the tool that was called again. Drag to pan, scroll to zoom.</p>
     <ul id="graph-summary" class="sr-only"></ul>
   </div>
+  <script type="application/json" id="bundled-trace">{"agent":"demo-agent","run_id":"run_001","started_at":"2026-10-09T00:00:00Z","steps":[{"detail":"User wants a dentist appointment Tuesday morning. I should check the calendar first, then search for dentists.","duration_ms":1200,"id":1,"label":"Thinking","status":"ok","type":"thought"},{"detail":"{\"day\": \"tuesday\", \"window\": \"morning\"}","duration_ms":340,"id":2,"label":"calendar.check_availability","result":"Free 9:00–11:30","status":"ok","type":"tool"},{"detail":"Morning is free. Now find nearby dentists that take the user's insurance.","duration_ms":900,"id":3,"label":"Thinking","status":"ok","type":"thought"},{"detail":"{\"near\": \"home\", \"insurance\": true}","duration_ms":2100,"id":4,"label":"places.search_dentists","result":"3 options found","status":"ok","type":"tool"},{"detail":"{\"place_id\": \"dentist_2\"}","duration_ms":800,"id":5,"label":"places.get_reviews","result":"Rate limited — retrying","status":"error","type":"tool"},{"detail":"{\"place_id\": \"dentist_2\"}","duration_ms":750,"id":6,"label":"places.get_reviews","result":"4.8 stars, 212 reviews","status":"ok","type":"tool"},{"detail":"Dentist 2 looks best. Booking needs owner approval first — this is a decision point.","duration_ms":1100,"id":7,"label":"Thinking","status":"ok","type":"thought"},{"detail":"Book Tuesday 9:30 at Bright Smile Dental?","duration_ms":0,"id":8,"label":"Needs you","status":"waiting","type":"escalation"}],"task":"Book a dentist appointment for Tuesday morning"}</script>
   <script src="vendor/vis-network.min.js"></script>
   <script>
     const icons = { thought: "💭", tool: "🔧", escalation: "✋" };
@@ -273,19 +276,31 @@
       applyView();
     });
 
+    function showTrace(trace, bundled) {
+      traceData = trace;
+      document.getElementById("title").textContent = trace.task;
+      document.getElementById("subtitle").textContent =
+        `${trace.agent} · ${trace.run_id} · ${trace.steps.length} steps`;
+      const note = document.getElementById("load-note");
+      if (bundled) {
+        note.hidden = false;
+        note.textContent = "Using the bundled demo trace.";
+      }
+      renderTimeline(trace);
+      if (view === "graph") buildGraph(trace);
+    }
+
     fetch("trace.json")
       .then(r => r.json())
-      .then(trace => {
-        traceData = trace;
-        document.getElementById("title").textContent = trace.task;
-        document.getElementById("subtitle").textContent =
-          `${trace.agent} · ${trace.run_id} · ${trace.steps.length} steps`;
-        renderTimeline(trace);
-        if (view === "graph") buildGraph(trace);
-      })
+      .then(trace => showTrace(trace, false))
       .catch(() => {
-        document.getElementById("timeline").innerHTML =
-          "<p>Couldn't load trace.json. Serve this folder over HTTP (e.g. <code>npx serve</code>) — fetch doesn't work from file://.</p>";
+        const bundled = document.getElementById("bundled-trace");
+        try {
+          showTrace(JSON.parse(bundled.textContent), true);
+        } catch (e) {
+          document.getElementById("timeline").innerHTML =
+            "<p>Couldn't load trace.json. Serve this folder over HTTP (e.g. <code>npx serve</code>) — fetch doesn't work from file://.</p>";
+        }
       });
   </script>
 </body>
