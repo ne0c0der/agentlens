@@ -7,8 +7,13 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #e6edf3; padding: 24px; max-width: 720px; margin: 0 auto; }
+  body.graph-mode { max-width: 1180px; }
   h1 { font-size: 20px; margin-bottom: 4px; }
-  .sub { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+  .sub { color: #8b949e; font-size: 13px; margin-bottom: 16px; }
+  .toggle { display: inline-flex; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+  .toggle button { background: transparent; color: #8b949e; border: 0; padding: 6px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .toggle button.active { background: #21262d; color: #e6edf3; }
+  .toggle button:focus-visible { outline: 2px solid #1f6feb; outline-offset: -2px; }
   .step { position: relative; padding: 0 0 20px 32px; }
   .step::before { content: ""; position: absolute; left: 9px; top: 22px; bottom: 0; width: 2px; background: #30363d; }
   .step:last-child::before { display: none; }
@@ -24,36 +29,278 @@
   .badge.ok { background: #1a472a; color: #3fb950; }
   .badge.error { background: #4a1a1a; color: #f85149; }
   .badge.waiting { background: #4a3a1a; color: #d29922; }
+  #graph {
+    height: 640px;
+    background-color: #161b22;
+    background-image: radial-gradient(#30363d 1px, transparent 1px);
+    background-size: 18px 18px;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+  }
+  #graph canvas { box-sizing: content-box; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 10px; color: #8b949e; font-size: 12px; list-style: none; }
+  .legend li { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .swatch.ok { background: #3fb950; }
+  .swatch.error { background: #f85149; }
+  .swatch.waiting { background: #d29922; }
+  .swatch.retry { width: 18px; height: 0; border-top: 2px solid #f85149; border-radius: 0; }
+  .hint { color: #8b949e; font-size: 12px; margin-top: 8px; }
+  .load-note { color: #d29922; font-size: 13px; margin: 0 0 12px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 </style>
 </head>
 <body>
   <h1 id="title">Agent Trace</h1>
   <div class="sub" id="subtitle"></div>
-  <div id="timeline"></div>
+  <p id="load-note" class="load-note" hidden></p>
+  <div class="toggle" role="tablist" aria-label="Trace view">
+    <button type="button" id="show-timeline" role="tab" aria-selected="true" aria-controls="timeline" class="active">Timeline</button>
+    <button type="button" id="show-graph" role="tab" aria-selected="false" aria-controls="graph-panel">Graph</button>
+  </div>
+  <div id="timeline" role="tabpanel" aria-labelledby="show-timeline"></div>
+  <div id="graph-panel" role="tabpanel" aria-labelledby="show-graph" hidden>
+    <ul class="legend">
+      <li><span class="swatch ok"></span>ok</li>
+      <li><span class="swatch error"></span>error</li>
+      <li><span class="swatch waiting"></span>waiting</li>
+      <li><span class="swatch retry"></span>retry loop</li>
+    </ul>
+    <div id="graph"></div>
+    <p class="hint">Solid arrows follow step order. A curved arrow loops a retry back to the tool that was called again. Drag to pan, scroll to zoom.</p>
+    <ul id="graph-summary" class="sr-only"></ul>
+  </div>
+  <script type="application/json" id="bundled-trace">{"agent":"demo-agent","run_id":"run_001","started_at":"2026-10-09T00:00:00Z","steps":[{"detail":"User wants a dentist appointment Tuesday morning. I should check the calendar first, then search for dentists.","duration_ms":1200,"id":1,"label":"Thinking","status":"ok","type":"thought"},{"detail":"{\"day\": \"tuesday\", \"window\": \"morning\"}","duration_ms":340,"id":2,"label":"calendar.check_availability","result":"Free 9:00–11:30","status":"ok","type":"tool"},{"detail":"Morning is free. Now find nearby dentists that take the user's insurance.","duration_ms":900,"id":3,"label":"Thinking","status":"ok","type":"thought"},{"detail":"{\"near\": \"home\", \"insurance\": true}","duration_ms":2100,"id":4,"label":"places.search_dentists","result":"3 options found","status":"ok","type":"tool"},{"detail":"{\"place_id\": \"dentist_2\"}","duration_ms":800,"id":5,"label":"places.get_reviews","result":"Rate limited — retrying","status":"error","type":"tool"},{"detail":"{\"place_id\": \"dentist_2\"}","duration_ms":750,"id":6,"label":"places.get_reviews","result":"4.8 stars, 212 reviews","status":"ok","type":"tool"},{"detail":"Dentist 2 looks best. Booking needs owner approval first — this is a decision point.","duration_ms":1100,"id":7,"label":"Thinking","status":"ok","type":"thought"},{"detail":"Book Tuesday 9:30 at Bright Smile Dental?","duration_ms":0,"id":8,"label":"Needs you","status":"waiting","type":"escalation"}],"task":"Book a dentist appointment for Tuesday morning"}</script>
+  <script src="vendor/vis-network.min.js"></script>
   <script>
     const icons = { thought: "💭", tool: "🔧", escalation: "✋" };
+    const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    const COLS = 4;
+    const COL_W = 300;
+    const ROW_H = 210;
+    const STATUS_COLORS = {
+      ok: { background: "#1a472a", border: "#3fb950" },
+      error: { background: "#4a1a1a", border: "#f85149" },
+      waiting: { background: "#4a3a1a", border: "#d29922" }
+    };
+
+    let traceData = null;
+    let view = "timeline";
+    let network = null;
+
+    function statusColors(status) {
+      return STATUS_COLORS[status] || { background: "#21262d", border: "#8b949e" };
+    }
+
+    function thoughtSummary(step) {
+      const text = String(step.detail || step.label || "Thinking").replace(/\s+/g, " ").trim();
+      const sentence = text.split(/(?<=[.!?])\s/)[0] || text;
+      return sentence.length > 72 ? sentence.slice(0, 71).trimEnd() + "…" : sentence;
+    }
+
+    function nodeTitle(step) {
+      if (step.type === "thought") return thoughtSummary(step);
+      return step.label || step.type || "Step";
+    }
+
+    function nodeLabel(step) {
+      const lines = [nodeTitle(step), step.status || ""];
+      const extra = step.type === "tool" ? step.result : step.type === "escalation" ? step.detail : "";
+      if (extra) {
+        const clean = String(extra).replace(/\s+/g, " ").trim();
+        lines.push(clean.length > 42 ? clean.slice(0, 41).trimEnd() + "…" : clean);
+      }
+      return lines.join("\n");
+    }
+
+    function tooltip(step) {
+      const lines = [step.type + " · " + (step.status || "")];
+      if (step.detail) lines.push(step.detail);
+      if (step.result) lines.push("→ " + step.result);
+      if (step.duration_ms) lines.push((step.duration_ms / 1000).toFixed(1) + "s");
+      else lines.push("—");
+      return lines.join("\n");
+    }
+
+    // A retry is the next step calling the same tool again after an error.
+    // The trace schema has no retry field; the loop is derived from that pair.
+    function retryTarget(steps, index) {
+      if (index < 1) return -1;
+      const step = steps[index];
+      const prev = steps[index - 1];
+      if (step.type === "tool" && prev.type === "tool" && step.label && step.label === prev.label && prev.status === "error") {
+        return index - 1;
+      }
+      return -1;
+    }
+
+    function nodePosition(index) {
+      const row = Math.floor(index / COLS);
+      let col = index % COLS;
+      if (row % 2 === 1) col = COLS - 1 - col;
+      return { x: col * COL_W, y: row * ROW_H };
+    }
+
+    function renderTimeline(trace) {
+      const tl = document.getElementById("timeline");
+      tl.replaceChildren();
+      trace.steps.forEach(s => {
+        const el = document.createElement("div");
+        el.className = "step";
+        const dotClass = s.status === "error" ? "error" : s.type;
+        el.innerHTML = `
+          <div class="dot ${dotClass}">${icons[s.type] || "•"}</div>
+          <div><span class="label">${s.label}</span><span class="badge ${s.status}">${s.status}</span></div>
+          <div class="meta">${s.duration_ms ? (s.duration_ms / 1000).toFixed(1) + "s" : "—"}</div>
+          <div class="detail">${s.detail || ""}${s.result ? "\n→ " + s.result : ""}</div>`;
+        tl.appendChild(el);
+      });
+    }
+
+    function renderSummary(steps) {
+      const summary = document.getElementById("graph-summary");
+      summary.replaceChildren();
+      steps.forEach((step, i) => {
+        const li = document.createElement("li");
+        li.textContent = "Step " + (i + 1) + ": " + nodeTitle(step) + " (" + (step.status || "") + ")";
+        summary.appendChild(li);
+      });
+      for (let i = 1; i < steps.length; i++) {
+        const flow = document.createElement("li");
+        flow.textContent = "Flow: step " + i + " → step " + (i + 1);
+        summary.appendChild(flow);
+        const target = retryTarget(steps, i);
+        if (target >= 0) {
+          const retry = document.createElement("li");
+          retry.textContent = "Retry loop: step " + (i + 1) + " back to step " + (target + 1) + " (" + steps[target].label + ")";
+          summary.appendChild(retry);
+        }
+      }
+    }
+
+    function buildGraph(trace) {
+      const host = document.getElementById("graph");
+      if (typeof vis === "undefined" || !vis.Network) {
+        host.textContent = "Graph library failed to load.";
+        return;
+      }
+      const steps = trace.steps;
+      const nodes = steps.map((step, i) => {
+        const colors = statusColors(step.status);
+        const pos = nodePosition(i);
+        return {
+          id: i,
+          x: pos.x,
+          y: pos.y,
+          label: nodeLabel(step),
+          title: tooltip(step),
+          shape: "box",
+          margin: 12,
+          widthConstraint: { minimum: 168, maximum: 210 },
+          color: {
+            background: colors.background,
+            border: colors.border,
+            highlight: { background: colors.background, border: colors.border },
+            hover: { background: colors.background, border: "#e6edf3" }
+          },
+          font: { face: FONT, color: "#e6edf3", size: 13, align: "left" },
+          shapeProperties: { borderRadius: 8 },
+          borderWidth: 2,
+          shadow: { enabled: true, color: "rgba(0,0,0,0.45)", size: 10, x: 0, y: 3 }
+        };
+      });
+      const edges = [];
+      for (let i = 1; i < steps.length; i++) {
+        edges.push({
+          id: "flow-" + i,
+          from: i - 1,
+          to: i,
+          arrows: { to: { enabled: true, scaleFactor: 0.7 } },
+          color: { color: "#8b949e", highlight: "#c9d1d9" },
+          width: 1.5,
+          smooth: { enabled: false }
+        });
+        const target = retryTarget(steps, i);
+        if (target >= 0) {
+          edges.push({
+            id: "retry-" + i,
+            from: i,
+            to: target,
+            label: "retry",
+            arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+            color: { color: "#f85149", highlight: "#ff7b72" },
+            width: 2.5,
+            smooth: { enabled: true, type: "curvedCW", roundness: 0.45 },
+            font: { face: FONT, color: "#f85149", size: 13, strokeWidth: 5, strokeColor: "#161b22", align: "middle", background: "#161b22" }
+          });
+        }
+      }
+      network = new vis.Network(host, { nodes: nodes, edges: edges }, {
+        layout: { improvedLayout: false },
+        physics: false,
+        autoResize: true,
+        interaction: { hover: true, tooltipDelay: 80, navigationButtons: false },
+        nodes: { shape: "box" },
+        edges: { selectionWidth: 0, arrowStrikethrough: false }
+      });
+      renderSummary(steps);
+      requestAnimationFrame(() => {
+        network.fit({ padding: 36, animation: false });
+        if (network.getScale() > 1) {
+          network.moveTo({ scale: 1, position: network.getViewPosition(), animation: false });
+        }
+      });
+    }
+
+    function applyView() {
+      const graph = view === "graph";
+      document.getElementById("timeline").hidden = graph;
+      document.getElementById("graph-panel").hidden = !graph;
+      document.body.classList.toggle("graph-mode", graph);
+      document.getElementById("show-timeline").classList.toggle("active", !graph);
+      document.getElementById("show-graph").classList.toggle("active", graph);
+      document.getElementById("show-timeline").setAttribute("aria-selected", String(!graph));
+      document.getElementById("show-graph").setAttribute("aria-selected", String(graph));
+      if (graph && traceData && !network) buildGraph(traceData);
+      else if (graph && network) {
+        requestAnimationFrame(() => network.redraw());
+      }
+    }
+
+    document.getElementById("show-timeline").addEventListener("click", () => {
+      view = "timeline";
+      applyView();
+    });
+    document.getElementById("show-graph").addEventListener("click", () => {
+      view = "graph";
+      applyView();
+    });
+
+    function showTrace(trace, bundled) {
+      traceData = trace;
+      document.getElementById("title").textContent = trace.task;
+      document.getElementById("subtitle").textContent =
+        `${trace.agent} · ${trace.run_id} · ${trace.steps.length} steps`;
+      const note = document.getElementById("load-note");
+      if (bundled) {
+        note.hidden = false;
+        note.textContent = "Using the bundled demo trace.";
+      }
+      renderTimeline(trace);
+      if (view === "graph") buildGraph(trace);
+    }
+
     fetch("trace.json")
       .then(r => r.json())
-      .then(trace => {
-        document.getElementById("title").textContent = trace.task;
-        document.getElementById("subtitle").textContent =
-          `${trace.agent} · ${trace.run_id} · ${trace.steps.length} steps`;
-        const tl = document.getElementById("timeline");
-        trace.steps.forEach(s => {
-          const el = document.createElement("div");
-          el.className = "step";
-          const dotClass = s.status === "error" ? "error" : s.type;
-          el.innerHTML = `
-            <div class="dot ${dotClass}">${icons[s.type] || "•"}</div>
-            <div><span class="label">${s.label}</span><span class="badge ${s.status}">${s.status}</span></div>
-            <div class="meta">${s.duration_ms ? (s.duration_ms / 1000).toFixed(1) + "s" : "—"}</div>
-            <div class="detail">${s.detail || ""}${s.result ? "\n→ " + s.result : ""}</div>`;
-          tl.appendChild(el);
-        });
-      })
+      .then(trace => showTrace(trace, false))
       .catch(() => {
-        document.getElementById("timeline").innerHTML =
-          "<p>Couldn't load trace.json. Serve this folder over HTTP (e.g. <code>npx serve</code>) — fetch doesn't work from file://.</p>";
+        const bundled = document.getElementById("bundled-trace");
+        try {
+          showTrace(JSON.parse(bundled.textContent), true);
+        } catch (e) {
+          document.getElementById("timeline").innerHTML =
+            "<p>Couldn't load trace.json. Serve this folder over HTTP (e.g. <code>npx serve</code>) — fetch doesn't work from file://.</p>";
+        }
       });
   </script>
 </body>
